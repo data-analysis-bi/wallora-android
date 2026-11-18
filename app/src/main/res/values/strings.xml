@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Wallora</string>
+    <string name="custom_widget_desc">Valmiki Ramayana shlokas in Sanskrit, Hindi, Gujarati or English, or your own text, countdown or date.</string>
+    <string name="calendar_widget_desc">Bold day and month grid on pure black.</string>
+</resources>
