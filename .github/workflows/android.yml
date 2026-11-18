@@ -21,7 +21,8 @@ jobs:
           gradle :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
       - name: Show errors only
         if: failure()
-        run: grep -E "^e: |error:|FAILED|What went wrong" -A3 build.log | head -80
+        run: |
+          grep -E "^e: |error:|FAILED|What went wrong" -A3 build.log | head -80
       - uses: actions/upload-artifact@v5
         with:
           name: Wallora-apk

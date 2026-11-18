@@ -144,8 +144,8 @@ object Prefs {
         favorites = if (id in favorites) favorites - id else favorites + id
         sp.edit().putStringSet("fav", favorites).apply()
     }
-    fun setQuality(q: String) { quality = q; sp.edit().putString("quality", q).apply() }
-    fun setUnsplashKey(k: String) { unsplashKey = k.trim(); sp.edit().putString("unsplash", unsplashKey).apply() }
+    fun updateQuality(q: String) { quality = q; sp.edit().putString("quality", q).apply() }
+    fun updateUnsplashKey(k: String) { unsplashKey = k.trim(); sp.edit().putString("unsplash", unsplashKey).apply() }
     fun addDownload(title: String) {
         downloads = (listOf("$title · ${LocalDate.now()}") + downloads).take(50)
         sp.edit().putString("downloads", downloads.joinToString("\n")).apply()

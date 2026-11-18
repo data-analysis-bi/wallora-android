@@ -54,8 +54,8 @@ fun ProfileScreen() {
         item {
             Text("Download quality", fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                FilterChip(selected = Prefs.quality == "high", onClick = { Prefs.setQuality("high") }, label = { Text("High") })
-                FilterChip(selected = Prefs.quality == "ultra", onClick = { Prefs.setQuality("ultra") }, label = { Text("Ultra (largest)") })
+                FilterChip(selected = Prefs.quality == "high", onClick = { Prefs.updateQuality("high") }, label = { Text("High") })
+                FilterChip(selected = Prefs.quality == "ultra", onClick = { Prefs.updateQuality("ultra") }, label = { Text("Ultra (largest)") })
             }
         }
         item {
@@ -66,7 +66,7 @@ fun ProfileScreen() {
             )
             Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(enabled = !CatalogState.loading, onClick = {
-                    Prefs.setUnsplashKey(key)
+                    Prefs.updateUnsplashKey(key)
                     scope.launch { CatalogState.load(ctx, force = true) }
                 }) { Text("Save key & refresh") }
                 if (CatalogState.loading) CircularProgressIndicator(Modifier.padding(4.dp))
