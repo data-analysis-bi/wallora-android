@@ -22,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +46,6 @@ import kotlinx.coroutines.withContext
 fun ProfileScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var key by remember { mutableStateOf(Prefs.unsplashKey) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Text("Profile", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold) }
         item {
@@ -59,21 +56,14 @@ fun ProfileScreen() {
             }
         }
         item {
-            Text("Wallpaper source", fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = key, onValueChange = { key = it }, singleLine = true, label = { Text("Unsplash Access Key") },
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            )
+            Text("Online catalog", fontWeight = FontWeight.SemiBold)
             Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(enabled = !CatalogState.loading, onClick = {
-                    Prefs.updateUnsplashKey(key)
-                    scope.launch { CatalogState.load(ctx, force = true) }
-                }) { Text("Save key & refresh") }
+                Button(enabled = !CatalogState.loading, onClick = { scope.launch { CatalogState.load(ctx, force = true) } }) { Text("Refresh catalog") }
                 if (CatalogState.loading) CircularProgressIndicator(Modifier.padding(4.dp))
             }
             CatalogState.status?.let { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp)) }
-            Text("Free key from unsplash.com/developers. Photos show the photographer's attribution.", fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            Text("Online wallpapers come from public-domain collections: The Met, Art Institute of Chicago (CC0) and NASA. The credit is shown on each wallpaper.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
         item {
             Text("Widgets", fontWeight = FontWeight.SemiBold)

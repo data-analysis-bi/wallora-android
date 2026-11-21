@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -54,6 +57,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -149,12 +153,30 @@ fun LazyGridScope.wallpaperItems(list: List<Wallpaper>, onOpen: (Wallpaper) -> U
     }
 }
 
+/** Calls onEnd when the grid is scrolled close to its last item ("load more"). */
+@Composable
+fun EndlessTrigger(state: LazyGridState, onEnd: suspend () -> Unit) {
+    val atEnd by remember {
+        derivedStateOf {
+            val info = state.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            info.totalItemsCount > 0 && last >= info.totalItemsCount - 6
+        }
+    }
+    val total by remember { derivedStateOf { state.layoutInfo.totalItemsCount } }
+    LaunchedEffect(atEnd, total) { if (atEnd) onEnd() }
+}
+
 @Composable
 fun DiscoverScreen(onOpen: (Wallpaper) -> Unit) {
+    val ctx = LocalContext.current
     var query by rememberSaveable { mutableStateOf("") }
     val all = CatalogState.all
-    val list = remember(query, all) { if (query.isBlank()) CatalogState.featured() else CatalogState.search(query) }
+    val list = if (query.isBlank()) CatalogState.discoverFeed() else CatalogState.search(query)
+    val gridState = rememberLazyGridState()
+    EndlessTrigger(gridState) { if (query.isBlank()) CatalogState.loadMore(ctx) }
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(2), contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -183,12 +205,16 @@ fun DiscoverScreen(onOpen: (Wallpaper) -> Unit) {
                 }
             }
             item(span = { GridItemSpan(maxLineSpan) }) { ShlokaCard() }
-            item(span = { GridItemSpan(maxLineSpan) }) { Text("Featured", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item(span = { GridItemSpan(maxLineSpan) }) { Text("Discover more", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         }
         wallpaperItems(list, onOpen)
-        if (query.isBlank() && !CatalogState.hasRemote) {
+        if (query.isBlank()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Text("Add an Unsplash key in Profile to unlock thousands more photos.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                if (CatalogState.hasMoreFeed) {
+                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                } else if (CatalogState.feed.isEmpty()) {
+                    Text(CatalogState.status ?: "Connect to the internet to load more wallpapers.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                }
             }
         }
     }
@@ -231,20 +257,26 @@ fun ShlokaCard() {
 
 @Composable
 fun CategoriesScreen(onOpen: (Wallpaper) -> Unit) {
+    val ctx = LocalContext.current
     var selected by remember { mutableStateOf<WallCategory?>(null) }
     val sel = selected
     if (sel != null) {
         BackHandler { selected = null }
         val items = CatalogState.inCategory(sel)
+        val catState = rememberLazyGridState()
+        LaunchedEffect(sel) { if (CatalogState.hasMore(sel) && CatalogState.inCategory(sel).size < 12) CatalogState.loadMore(ctx, sel) }
+        EndlessTrigger(catState) { CatalogState.loadMore(ctx, sel) }
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { selected = null }) { Icon(Icons.Filled.ArrowBack, "Back") }
                 Text(sel.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             }
             if (items.isEmpty()) {
-                Text("Nothing here yet. Add an Unsplash access key in Profile to browse licensed photos.", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (CatalogState.hasMore(sel)) Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                else Text("The online catalog has no wallpapers in this category yet. New ones are added daily.", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 LazyVerticalGrid(
+                    state = catState,
                     columns = GridCells.Fixed(2), contentPadding = PaddingValues(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) { wallpaperItems(items, onOpen) }
@@ -265,7 +297,7 @@ fun CategoriesScreen(onOpen: (Wallpaper) -> Unit) {
                 ) {
                     Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
                         Text(c.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                        Text("${CatalogState.inCategory(c).size} wallpapers", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                        Text("${CatalogState.count(c)} wallpapers", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                     }
                 }
             }

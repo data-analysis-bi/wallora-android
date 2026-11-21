@@ -50,8 +50,11 @@ object Images {
         val name = MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) } + ".jpg"
         val f = File(cacheDir(ctx), name)
         if (!f.exists()) {
-            val bytes = URL(url).openStream().use { it.readBytes() }
-            f.writeBytes(bytes)
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.setRequestProperty("User-Agent", "Wallora/1.0")
+            c.connectTimeout = 15000
+            c.readTimeout = 30000
+            f.writeBytes(c.inputStream.use { it.readBytes() })
         }
         return BitmapFactory.decodeFile(f.path)
     }
@@ -77,133 +80,161 @@ object MediaSaver {
     }
 }
 
-private class UnsplashError(message: String) : Exception(message)
 
-private fun JSONObject.strOrNull(k: String): String? = if (isNull(k)) null else getString(k)
+const val CATALOG_URL = "https://data-analysis-bi.github.io/wallora-catalog/index.json"
 
-object Unsplash {
-    private fun get(url: String, key: String): String {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.setRequestProperty("Authorization", "Client-ID $key")
-        c.connectTimeout = 15000
-        c.readTimeout = 20000
-        val code = c.responseCode
-        if (code != 200) throw UnsplashError(
-            when (code) {
-                401 -> "Unsplash rejected the key (401). Check you pasted the Access Key."
-                403 -> "Unsplash rate limit reached (demo keys: 50 requests/hour). Try again later."
-                else -> "Unsplash error $code."
+private fun JSONObject.strOrNull(k: String): String? =
+    if (!has(k) || isNull(k)) null else getString(k).ifEmpty { null }
+
+/** The online catalog: static JSON on GitHub Pages (public-domain / CC0 museum + NASA images). */
+object Online {
+    private fun cacheFile(ctx: Context, url: String): File {
+        val name = MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
+        return File(File(ctx.filesDir, "net").apply { mkdirs() }, "$name.json")
+    }
+
+    /** Network first; if offline, the last copy saved on the device. */
+    fun fetchJson(ctx: Context, url: String): JSONObject? {
+        val f = cacheFile(ctx, url)
+        try {
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.setRequestProperty("User-Agent", "Wallora/1.0")
+            c.connectTimeout = 15000
+            c.readTimeout = 20000
+            if (c.responseCode == 200) {
+                val text = c.inputStream.bufferedReader().use { it.readText() }
+                val o = JSONObject(text)
+                f.writeText(text)
+                return o
             }
-        )
-        return c.inputStream.bufferedReader().use { it.readText() }
-    }
-
-    fun search(key: String, query: String, cat: WallCategory): List<Wallpaper> {
-        val url = "https://api.unsplash.com/search/photos?query=${URLEncoder.encode(query, "UTF-8")}&orientation=portrait&per_page=20"
-        val results = JSONObject(get(url, key)).getJSONArray("results")
-        return List(results.length()) {
-            val o = results.getJSONObject(it)
-            val urls = o.getJSONObject("urls")
-            val title = (o.strOrNull("description") ?: o.strOrNull("alt_description") ?: "Photo")
-                .replaceFirstChar { ch -> ch.uppercase() }.take(60)
-            Wallpaper(
-                id = "u-" + o.getString("id"), title = title, category = cat,
-                source = Source.Remote(urls.getString("small"), urls.getString("regular"), urls.getString("full")),
-                attribution = "Photo by " + o.getJSONObject("user").getString("name") + " on Unsplash",
-                downloadLocation = o.getJSONObject("links").getString("download_location")
-            )
+        } catch (_: Exception) {
         }
+        return runCatching { JSONObject(f.readText()) }.getOrNull()
     }
 
-    /** Unsplash's terms ask apps to ping this when a photo is downloaded. */
-    fun track(key: String, url: String) { runCatching { get(url, key) } }
+    private fun parseItem(o: JSONObject): Wallpaper? {
+        val cat = WallCategory.values().firstOrNull { it.name.equals(o.getString("category"), ignoreCase = true) } ?: return null
+        val url = o.getString("url")
+        return Wallpaper(
+            id = o.getString("id"), title = o.getString("title"), category = cat,
+            source = Source.Remote(o.getString("thumb"), url, o.strOrNull("hires") ?: url),
+            attribution = o.strOrNull("credit"), sourceUrl = o.strOrNull("sourceUrl")
+        )
+    }
+
+    fun parseItems(arr: JSONArray): List<Wallpaper> =
+        (0 until arr.length()).mapNotNull { runCatching { parseItem(arr.getJSONObject(it)) }.getOrNull() }
 
     fun toJson(list: List<Wallpaper>): JSONArray = JSONArray().also { arr ->
         list.forEach { w ->
             val s = w.source as? Source.Remote ?: return@forEach
             arr.put(JSONObject().apply {
-                put("id", w.id); put("title", w.title); put("cat", w.category.name)
-                put("thumb", s.thumb); put("regular", s.regular); put("full", s.full)
-                put("attr", w.attribution); put("dl", w.downloadLocation)
+                put("id", w.id); put("title", w.title); put("category", w.category.name.lowercase())
+                put("thumb", s.thumb); put("url", s.regular); put("hires", s.full)
+                put("credit", w.attribution ?: ""); put("sourceUrl", w.sourceUrl ?: "")
             })
         }
     }
 
-    fun fromJson(arr: JSONArray): List<Wallpaper> = List(arr.length()) {
-        val o = arr.getJSONObject(it)
-        Wallpaper(o.getString("id"), o.getString("title"),
-            WallCategory.values().firstOrNull { c -> c.name == o.getString("cat") } ?: WallCategory.NATURE,
-            Source.Remote(o.getString("thumb"), o.getString("regular"), o.getString("full")),
-            o.strOrNull("attr"), o.strOrNull("dl"))
-    }
+    fun fromJson(arr: JSONArray): List<Wallpaper> = parseItems(arr)
 }
 
 object CatalogState {
     var all by mutableStateOf(Catalog.bundled)
         private set
+    var feed by mutableStateOf<List<Wallpaper>>(emptyList())
+        private set
     var status by mutableStateOf<String?>(null)
         private set
     var loading by mutableStateOf(false)
         private set
+    var hasMoreFeed by mutableStateOf(false)
+        private set
+
     private var remote: List<Wallpaper> = emptyList()
-    val hasRemote: Boolean get() = remote.isNotEmpty()
+    private var base = ""
+    private var generated = ""
+    private var feedPages = 0
+    private var feedLoaded = 0
+    private var catPages = mapOf<String, Int>()
+    private var catCounts = mapOf<String, Int>()
+    private val catLoaded = HashMap<String, Int>()
+    private var busy = false
 
-    private val queries = listOf(
-        WallCategory.NATURE to "nature landscape", WallCategory.MOUNTAINS to "mountains",
-        WallCategory.SPACE to "galaxy night sky", WallCategory.ABSTRACT to "abstract art",
-        WallCategory.ARCHITECTURE to "modern architecture", WallCategory.CARS to "supercar",
-        WallCategory.ANIME to "illustration art", WallCategory.TECHNOLOGY to "technology dark",
-        WallCategory.DARK to "dark moody", WallCategory.MINIMALIST to "minimal",
-        WallCategory.AMOLED to "black minimal", WallCategory.GRADIENTS to "gradient",
-        WallCategory.UHD to "landscape", WallCategory.SEASONAL to "autumn winter"
-    )
-
-    private fun apply() { all = Catalog.bundled + remote }
-
-    /** Cached for 12 h so we stay well under Unsplash's rate limit. */
+    /** Loads the catalog index and the first page. Offline: uses the last saved copy. */
     suspend fun load(ctx: Context, force: Boolean = false) {
-        val key = Prefs.unsplashKey
-        if (key.isBlank()) { remote = emptyList(); apply(); status = null; return }
-        withContext(Dispatchers.IO) {
-            val f = File(ctx.filesDir, "remote-catalog.json")
-            var fresh = false
-            if (f.exists()) {
-                runCatching {
-                    val o = JSONObject(f.readText())
-                    val items = Unsplash.fromJson(o.getJSONArray("items"))
-                    if (items.isNotEmpty()) {
-                        remote = items; apply()
-                        fresh = System.currentTimeMillis() - o.getLong("date") < 12 * 3600_000L
-                        if (fresh) status = "${items.size} photos (cached)"
-                    }
-                }
+        if (loading) return
+        loading = true
+        try {
+            val idx = withContext(Dispatchers.IO) { Online.fetchJson(ctx, CATALOG_URL) }
+            if (idx == null) { status = "Offline — showing built-in wallpapers"; return }
+            val gen = idx.optString("generated")
+            if (force || gen != generated) { remote = emptyList(); feed = emptyList(); feedLoaded = 0; catLoaded.clear(); all = Catalog.bundled }
+            generated = gen
+            base = idx.getString("base")
+            feedPages = idx.getJSONObject("all").getInt("pages")
+            val cats = idx.getJSONArray("categories")
+            val pages = HashMap<String, Int>()
+            val counts = HashMap<String, Int>()
+            for (i in 0 until cats.length()) {
+                val c = cats.getJSONObject(i)
+                pages[c.getString("id")] = c.getInt("pages")
+                counts[c.getString("id")] = c.getInt("count")
             }
-            if (fresh && !force) return@withContext
-            loading = true
-            val out = ArrayList<Wallpaper>()
-            val seen = HashSet<String>()
-            var lastError: String? = null
-            for ((cat, q) in queries) {
-                try {
-                    Unsplash.search(key, q, cat).forEach { if (seen.add(it.id)) out.add(it) }
-                } catch (e: Exception) {
-                    lastError = e.message
-                    if (e.message?.startsWith("Unsplash") == true) break
-                }
-            }
+            catPages = pages
+            catCounts = counts
+            hasMoreFeed = feedLoaded < feedPages
+            if (feedLoaded == 0) loadFeedPage(ctx)
+            status = "${idx.getInt("total")} online wallpapers · updated $gen"
+        } finally {
             loading = false
-            if (out.isEmpty()) { status = lastError ?: "No photos returned."; return@withContext }
-            remote = out; apply()
-            status = "${out.size} photos loaded" + (lastError?.let { " — $it" } ?: "")
-            f.writeText(JSONObject().put("date", System.currentTimeMillis()).put("items", Unsplash.toJson(out)).toString())
         }
     }
 
-    fun daily(): Wallpaper {
-        val d = java.time.LocalDate.now().dayOfYear
-        return all[d % all.size]
+    private suspend fun loadFeedPage(ctx: Context) {
+        val page = withContext(Dispatchers.IO) { Online.fetchJson(ctx, "${base}all/${feedLoaded + 1}.json") } ?: return
+        feedLoaded++
+        val items = Online.parseItems(page.getJSONArray("items"))
+        val have = feed.map { it.id }.toHashSet()
+        feed = feed + items.filter { have.add(it.id) }
+        merge(items)
+        hasMoreFeed = feedLoaded < feedPages
     }
-    fun featured(): List<Wallpaper> = WallCategory.values().flatMap { c -> all.filter { it.category == c }.take(2) }
+
+    suspend fun loadMore(ctx: Context) {
+        if (busy || feedLoaded >= feedPages) return
+        busy = true
+        try { loadFeedPage(ctx) } finally { busy = false }
+    }
+
+    fun hasMore(c: WallCategory): Boolean {
+        val id = c.name.lowercase()
+        return (catLoaded[id] ?: 0) < (catPages[id] ?: 0)
+    }
+
+    suspend fun loadMore(ctx: Context, c: WallCategory) {
+        if (busy || !hasMore(c)) return
+        busy = true
+        try {
+            val id = c.name.lowercase()
+            val n = (catLoaded[id] ?: 0) + 1
+            val page = withContext(Dispatchers.IO) { Online.fetchJson(ctx, "${base}c/$id/$n.json") } ?: return
+            catLoaded[id] = n
+            merge(Online.parseItems(page.getJSONArray("items")))
+        } finally { busy = false }
+    }
+
+    private fun merge(items: List<Wallpaper>) {
+        val seen = remote.map { it.id }.toHashSet()
+        remote = remote + items.filter { seen.add(it.id) }
+        all = Catalog.bundled + remote
+    }
+
+    /** Discover feed: a few built-in wallpapers first, then the online feed (loads more as you scroll). */
+    fun discoverFeed(): List<Wallpaper> = Catalog.bundled.take(10) + feed
+    fun count(c: WallCategory): Int = maxOf(inCategory(c).size, catCounts[c.name.lowercase()] ?: 0)
+
+    fun daily(): Wallpaper = all[java.time.LocalDate.now().dayOfYear % all.size]
     fun inCategory(c: WallCategory) = all.filter { it.category == c }
     fun search(q: String): List<Wallpaper> {
         val t = q.lowercase()

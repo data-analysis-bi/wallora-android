@@ -297,7 +297,7 @@ fun FavoritesScreen(onOpen: (Wallpaper) -> Unit) {
             FilterChip(selected = tab == 1, onClick = { tab = 1; designs = DesignStore.load(ctx) }, label = { Text("Widgets") })
         }
         if (tab == 0) {
-            val items = CatalogState.all.filter { it.id in Prefs.favorites }
+            val items = (CatalogState.all + Prefs.favoriteItems).distinctBy { it.id }.filter { it.id in Prefs.favorites }
             if (items.isEmpty()) Text("No favorites yet. Tap the heart on any wallpaper.", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             else LazyVerticalGrid(
                 columns = GridCells.Fixed(2), contentPadding = PaddingValues(12.dp),

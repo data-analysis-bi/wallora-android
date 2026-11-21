@@ -3,9 +3,11 @@ package com.wallora.app
 import android.app.WallpaperManager
 import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,7 +88,6 @@ fun ViewerScreen(w: Wallpaper, onClose: () -> Unit) {
             if (r.isSuccess) {
                 toast("Wallpaper set: $label")
                 Prefs.addDownload(w.title)
-                w.downloadLocation?.let { loc -> launch(Dispatchers.IO) { Unsplash.track(Prefs.unsplashKey, loc) } }
             } else toast("Couldn't set wallpaper: ${r.exceptionOrNull()?.message}")
         }
     }
@@ -129,7 +130,7 @@ fun ViewerScreen(w: Wallpaper, onClose: () -> Unit) {
                 Spacer(Modifier.width(6.dp))
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { Prefs.toggleFavorite(w.id) }, modifier = Modifier.background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(50))) {
+            IconButton(onClick = { Prefs.toggleFavorite(w) }, modifier = Modifier.background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(50))) {
                 Icon(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "Favorite", tint = if (fav) Color(0xFFFF4D8D) else Color.White)
             }
         }
@@ -137,7 +138,11 @@ fun ViewerScreen(w: Wallpaper, onClose: () -> Unit) {
         Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             w.attribution?.let {
                 Text(it, color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally)
-                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp))
+                    .clip(RoundedCornerShape(50))
+                    .clickable(enabled = w.sourceUrl != null) {
+                        w.sourceUrl?.let { u -> ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u))) }
+                    }
+                    .background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 10.dp, vertical = 4.dp))
             }
             val enabled = bmp != null && !busy
             val colors = ButtonDefaults.buttonColors(containerColor = tint, contentColor = Color.Black)

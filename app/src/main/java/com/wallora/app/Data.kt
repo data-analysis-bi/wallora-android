@@ -31,7 +31,8 @@ enum class WallCategory(val title: String, val c1: Int, val c2: Int) {
     DARK("Dark Aesthetic", 0xFF0B0B1A.toInt(), 0xFF2A2A52.toInt()),
     GRADIENTS("Gradients", 0xFFFFB88C.toInt(), 0xFFDE6262.toInt()),
     UHD("4K & Ultra HD", 0xFF11998E.toInt(), 0xFF38EF7D.toInt()),
-    SEASONAL("Seasonal", 0xFFA1C4FD.toInt(), 0xFFC2E9FB.toInt())
+    SEASONAL("Seasonal", 0xFFA1C4FD.toInt(), 0xFFC2E9FB.toInt()),
+    ART("Art", 0xFF8E5A3C.toInt(), 0xFFE6C79C.toInt())
 }
 
 sealed interface Source {
@@ -47,7 +48,7 @@ data class Wallpaper(
     val category: WallCategory,
     val source: Source,
     val attribution: String? = null,
-    val downloadLocation: String? = null
+    val sourceUrl: String? = null
 )
 
 object Catalog {
@@ -126,7 +127,7 @@ object Prefs {
         private set
     var quality by mutableStateOf("high")
         private set
-    var unsplashKey by mutableStateOf("")
+    var favoriteItems by mutableStateOf(listOf<Wallpaper>())
         private set
     var downloads by mutableStateOf(listOf<String>())
         private set
@@ -136,16 +137,18 @@ object Prefs {
         sp = ctx.applicationContext.getSharedPreferences("wallora", Context.MODE_PRIVATE)
         favorites = (sp.getStringSet("fav", emptySet()) ?: emptySet()).toSet()
         quality = sp.getString("quality", "high") ?: "high"
-        unsplashKey = sp.getString("unsplash", "") ?: ""
+        favoriteItems = runCatching { Online.fromJson(JSONArray(sp.getString("fav_items", "[]"))) }.getOrDefault(emptyList())
         downloads = (sp.getString("downloads", "") ?: "").split("\n").filter { it.isNotBlank() }
     }
 
-    fun toggleFavorite(id: String) {
-        favorites = if (id in favorites) favorites - id else favorites + id
-        sp.edit().putStringSet("fav", favorites).apply()
+    fun toggleFavorite(w: Wallpaper) {
+        val adding = w.id !in favorites
+        favorites = if (adding) favorites + w.id else favorites - w.id
+        // keep a saved copy of online wallpapers so favorites survive restarts and work offline
+        favoriteItems = if (adding && w.source is Source.Remote) favoriteItems + w else favoriteItems.filter { it.id != w.id }
+        sp.edit().putStringSet("fav", favorites).putString("fav_items", Online.toJson(favoriteItems).toString()).apply()
     }
     fun updateQuality(q: String) { quality = q; sp.edit().putString("quality", q).apply() }
-    fun updateUnsplashKey(k: String) { unsplashKey = k.trim(); sp.edit().putString("unsplash", unsplashKey).apply() }
     fun addDownload(title: String) {
         downloads = (listOf("$title · ${LocalDate.now()}") + downloads).take(50)
         sp.edit().putString("downloads", downloads.joinToString("\n")).apply()
